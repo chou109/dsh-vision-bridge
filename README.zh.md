@@ -77,7 +77,7 @@ _把你的截图放进 [`screenshots/`](screenshots) 文件夹，然后在下面
 
 把下面这段话原样发给你的 AI 助手：
 
-> 请把 `C:\Users\周超\dsh-vision-bridge` 里的 dsh-vision-bridge 功能部署到我的本地 DeepSeek Harness web profile。
+> 请把 `https://github.com/chou109/dsh-vision-bridge` 里的 dsh-vision-bridge 功能部署到我的本地 DeepSeek Harness web profile。
 > 1) Windows 下在仓库根目录运行 `.\install.ps1`——它用 `git -c core.autocrlf=false apply` 把 `patch\dsh-host-apiproxy.patch` 和 `patch\dsh-llm-pi-ai.patch` 打进 `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` 对应文件，然后重启 harness。macOS/Linux 用 `./install.sh`（重启 `dsh web` 由我自己来）。
 > 2) 脚本不可用时，按 README「如果你是 AI 请看」的精确步骤手动打两个补丁。
 > 3) 注意：这个项目**只是"图片发送 + 视觉模型插件"之间的桥**，它本身不包含视觉模型——视觉模型插件需要我另外配置，而且视觉模型可以自由选择。如果我没有指定用哪个视觉模型，请帮我**推荐一个能适配的**（例如 `mcp-qwen-mm-plugins-api` / `vision_chat`），并确认它在 `profiles\web\cordis.patch.yml` 里注册好、API key 可用。
