@@ -35,14 +35,6 @@ You never type a path; the recognition happens on its own.
 > - The vision model is **freely selectable** — any tool that takes an image and returns text works;
 > - If you did not specify which vision model to use, let the AI **recommend a compatible one** (e.g. `mcp-qwen-mm-plugins-api` / `vision_chat`); the placeholder tells the agent to use whichever vision tool it currently has.
 
-## Screenshots
-
-_Drop your screenshots into the [`screenshots/`](screenshots) folder and reference them here._
-
-![Pasted image in the send box](screenshots/paste.png)
-
-![The agent describing the pasted image](screenshots/result.png)
-
 ## Requirements
 
 - DeepSeek Harness web UI (`dsh web --host 127.0.0.1 --port 3080`)

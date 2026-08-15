@@ -35,14 +35,6 @@
 > - 视觉模型**可以自由选择**——只要是一个"能接收图片并返回文字描述"的工具即可，不限于某一个；
 > - 如果你没说用哪个视觉模型，让 AI **自己推荐一个能适配的**（比如 `mcp-qwen-mm-plugins-api` 的 `vision_chat`）；AI 会按占位符里的提示，调用它当前可用的识图工具。
 
-## 展示图位置
-
-_把你的截图放进 [`screenshots/`](screenshots) 文件夹，然后在下面引用。_
-
-![输入框里粘贴的图片](screenshots/paste.png)
-
-![AI 自动描述粘贴的图片](screenshots/result.png)
-
 ## 环境要求
 
 - DeepSeek Harness Web 界面（`dsh web --host 127.0.0.1 --port 3080`）
