@@ -1,5 +1,5 @@
 diff --git a/index.js b/index.js
-index 195d407..08aa678 100644
+index 195d407..d6364f7 100644
 --- a/index.js
 +++ b/index.js
 @@ -9,6 +9,9 @@ import { credentialRef } from "@deepseek-ai/dsh-credentials";
@@ -21,7 +21,7 @@ index 195d407..08aa678 100644
 +	const out = [];
 +	for (const block of blocks) {
 +		if (block.type === "image") {
-+			out.push({ type: "text", text: `[图片附件：${await imageAttachmentPath(block.attachment)}（如需了解内容，请调用 vision_chat 工具，images 参数传此路径）]` });
++			out.push({ type: "text", text: `[图片附件：${await imageAttachmentPath(block.attachment)}（如需了解内容，请调用你可用的视觉识图工具识别此图片；例如 vision_chat，images 参数传此路径）]` });
 +		} else if (block.type === "tool-result") {
 +			out.push({ ...block, content: await projectImageBlocksToText(block.content) });
 +		} else {

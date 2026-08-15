@@ -26,9 +26,14 @@
 
 1. **把图片粘贴进输入框**（正常显示缩略图）；
 2. **发送**——即使聊天模型不支持图片，消息也能正常发出；
-3. Harness 自动把图片以**本地路径**的形式交给 AI，AI **自动调用 `vision_chat` 工具**（qwen-mm-plugins-api）识别图片——描述、OCR、问答，你问什么它答什么。
+3. Harness 自动把图片以**本地路径**的形式交给 AI，AI **自动调用你可用的视觉识图工具**识别图片——描述、OCR、问答，你问什么它答什么。
 
 全程不需要你手动填路径，识别全自动。
+
+> **请务必理解这一点**：这个项目**只是一座桥**——它负责"图片能发出去、并且以路径形式交给 AI"。它**不包含、也不替你安装任何视觉模型**：
+> - 视觉模型插件需要**你自己另外配置**（例如把 qwen-mm-plugins-api 注册进 `profiles\web\cordis.patch.yml`，并配好 API key）；
+> - 视觉模型**可以自由选择**——只要是一个"能接收图片并返回文字描述"的工具即可，不限于某一个；
+> - 如果你没说用哪个视觉模型，让 AI **自己推荐一个能适配的**（比如 `mcp-qwen-mm-plugins-api` 的 `vision_chat`）；AI 会按占位符里的提示，调用它当前可用的识图工具。
 
 ## 展示图位置
 
@@ -72,10 +77,11 @@ _把你的截图放进 [`screenshots/`](screenshots) 文件夹，然后在下面
 
 把下面这段话原样发给你的 AI 助手：
 
-> 请把 `<仓库路径>` 里的 dsh-vision-bridge 功能部署到我的本地 DeepSeek Harness web profile。
+> 请把 `C:\Users\周超\dsh-vision-bridge` 里的 dsh-vision-bridge 功能部署到我的本地 DeepSeek Harness web profile。
 > 1) Windows 下在仓库根目录运行 `.\install.ps1`——它用 `git -c core.autocrlf=false apply` 把 `patch\dsh-host-apiproxy.patch` 和 `patch\dsh-llm-pi-ai.patch` 打进 `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` 对应文件，然后重启 harness。macOS/Linux 用 `./install.sh`（重启 `dsh web` 由我自己来）。
 > 2) 脚本不可用时，按 README「如果你是 AI 请看」的精确步骤手动打两个补丁。
-> 3) harness 起来后验证：我在聊天框粘贴一张图片发送，AI 必须自动识别图片内容（它会收到 `[图片附件：<路径>（如需了解内容，请调用 vision_chat 工具…）]` 并自动调用 `vision_chat`）。如果 `profiles\web\cordis.patch.yml` 里没有 `mcp-qwen-mm-plugins-api`，先帮我装好识图插件再验证。
+> 3) 注意：这个项目**只是"图片发送 + 视觉模型插件"之间的桥**，它本身不包含视觉模型——视觉模型插件需要我另外配置，而且视觉模型可以自由选择。如果我没有指定用哪个视觉模型，请帮我**推荐一个能适配的**（例如 `mcp-qwen-mm-plugins-api` / `vision_chat`），并确认它在 `profiles\web\cordis.patch.yml` 里注册好、API key 可用。
+> 4) harness 起来后验证：我在聊天框粘贴一张图片发送，AI 必须自动识别图片内容（它会收到 `[图片附件：<路径>（如需了解内容，请调用你可用的视觉识图工具…）]` 并自动调用识图工具）。
 
 ## 使用方法
 
@@ -107,14 +113,14 @@ _把你的截图放进 [`screenshots/`](screenshots) 文件夹，然后在下面
 2. **`patch/dsh-llm-pi-ai.patch`** — 在 `@deepseek-ai/dsh-llm-pi-ai/lib/index.js` 的 `stream()` 里，原来纯文本模型收到图片块会抛 `UNSUPPORTED_CONTENT`。补丁改为把每个图片块**投影成文本占位符**：
 
    ```
-   [图片附件：<绝对路径>（如需了解内容，请调用 vision_chat 工具，images 参数传此路径）]
+   [图片附件：<绝对路径>（如需了解内容，请调用你可用的视觉识图工具识别此图片；例如 vision_chat，images 参数传此路径）]
    ```
 
    路径由 `imageAttachmentPath()` 从内容寻址引用解析：`<DSH_HOME>/attachments/v1/objects/<aa>/<sha256>.<ext>`（尽力硬链补上扩展名，方便工具识别类型）。投影会递归进入 `tool-result` 内容，所以工具返回的图片（如 `read_image`）同样处理。（3 个 hunk。）
 
-3. **识别侧不在本仓库** — AI 看到占位符后调用 **qwen-mm-plugins-api** MCP 服务的 `vision_chat` 工具，该服务必须已注册在 profile（`profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api`）且有可用的 API key。
+3. **识别侧不在本仓库** — 占位符是**通用指令**（"调用你可用的视觉识图工具"），AI 会自动选择它当前可用的识图工具。典型搭配是 **qwen-mm-plugins-api** MCP 服务的 `vision_chat`（需已注册在 profile `profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api` 且 API key 可用），但**不限于此**——任何"输入图片路径、输出文字描述"的工具都能适配。
 
-**数据流：** 粘贴 → 草稿缩略图 → 发送 → `prompt` RPC 放行（补丁 1）→ 消息持久化保留图片块（聊天历史仍显示图片）→ LLM 请求序列化遇到纯文本模型 → 投影（补丁 2）→ AI 上下文收到路径占位符 → AI 调用 `vision_chat(path)` → 回答。
+**数据流：** 粘贴 → 草稿缩略图 → 发送 → `prompt` RPC 放行（补丁 1）→ 消息持久化保留图片块（聊天历史仍显示图片）→ LLM 请求序列化遇到纯文本模型 → 投影（补丁 2）→ AI 上下文收到路径占位符 → AI 调用可用的识图工具（如 `vision_chat(path)`）→ 回答。
 
 ## 部署（精确步骤）
 
@@ -139,7 +145,7 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-p
 
 1. 在聊天框粘贴一张图片并发送（不打字会自动发送）。
 2. 预期：AI 的回答显示它分析了图片（描述/OCR/回答）。
-3. 链路上：到达 LLM 的用户消息里含 `[图片附件：<路径>（如需了解内容，请调用 vision_chat 工具…）]`——这是设计，不是报错。
+3. 链路上：到达 LLM 的用户消息里含 `[图片附件：<路径>（如需了解内容，请调用你可用的视觉识图工具识别此图片；例如 vision_chat，images 参数传此路径）]`——占位符是通用指令（不写死某个工具），AI 会调用它当前可用的识图工具；这是设计，不是报错。
 4. 直接检查：
 
    ```powershell
@@ -154,7 +160,8 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-p
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | 发送时仍提示"当前模型不支持图片…" | host 补丁没加载（没重启，或 profile 的 `node_modules` junction 被重装刷新） | 重启 harness；重新打补丁；用上面的检查确认 |
-| AI 回复"看不到图片" | `vision_chat` MCP 工具没注册或 key 缺失 | 检查 `profiles\web\cordis.patch.yml` 有 `mcp-qwen-mm-plugins-api`；配置 key；重启 |
+| AI 回复"看不到图片" | 识图工具没注册或 key 缺失 | 检查 `profiles\web\cordis.patch.yml` 有对应的识图 MCP（如 `mcp-qwen-mm-plugins-api`）；配置 key；重启 |
+| 安装脚本显示成功但功能没生效 | git 在含非 ASCII 字符的路径（如中文用户名）下可能**静默跳过**补丁（exit 0 但文件没变） | 安装脚本现在会做"按内容复查"并大声报错；手动时用 `Select-String` 验证（见上），或把 dsh 移到纯 ASCII 路径，或手动 `git apply -p1` |
 | 占位符路径指向不存在的文件 | 附件存储根不同（`DSH_HOME` 覆盖）或对象被清理 | 检查 `<DSH_HOME>\attachments\v1\objects\<aa>\<sha256>`；重新粘贴图片 |
 | `git apply` 失败 | 安装的包版本 ≠ 0.1.0-rc.6 | 用 `npm pack` 精确版本重新 diff |
 | 图片发给支持图片的模型 | 不投影（设计如此）——原始图片直接给模型 | 不是 bug；本功能面向纯文本模型 |

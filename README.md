@@ -26,9 +26,14 @@ After installing this project:
 
 1. **Paste any image** into the send box (it shows as a thumbnail, as usual).
 2. **Send it** — the message goes through even though the chat model cannot take images.
-3. The harness automatically hands the agent the image as a **local file path**, and the agent **automatically calls the `vision_chat` tool** (qwen-mm-plugins-api) to recognize it — it answers with a description, OCR, VQA… whatever you asked.
+3. The harness automatically hands the agent the image as a **local file path**, and the agent **automatically calls whatever vision tool it has available** (e.g. `vision_chat` from qwen-mm-plugins-api) to recognize it — it answers with a description, OCR, VQA… whatever you asked.
 
 You never type a path; the recognition happens on its own.
+
+> **Please understand this clearly**: this project is **only a bridge** — it makes the image *sendable* and hands it to the agent as a path. It does **not** include or install any vision model:
+> - The vision plugin must be **configured by you** (e.g. register qwen-mm-plugins-api in `profiles\web\cordis.patch.yml` with a working API key);
+> - The vision model is **freely selectable** — any tool that takes an image and returns text works;
+> - If you did not specify which vision model to use, let the AI **recommend a compatible one** (e.g. `mcp-qwen-mm-plugins-api` / `vision_chat`); the placeholder tells the agent to use whichever vision tool it currently has.
 
 ## Screenshots
 
@@ -72,10 +77,11 @@ _Drop your screenshots into the [`screenshots/`](screenshots) folder and referen
 
 Copy/paste this whole paragraph into your AI assistant:
 
-> Deploy the dsh-vision-bridge feature from `<repo path>` to my local DeepSeek Harness web profile.
+> Deploy the dsh-vision-bridge feature from `C:\Users\周超\dsh-vision-bridge` to my local DeepSeek Harness web profile.
 > 1) Windows: run `.\install.ps1` from the repo root — it applies `patch\dsh-host-apiproxy.patch` and `patch\dsh-llm-pi-ai.patch` into `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` with `git -c core.autocrlf=false apply`, then restarts the harness. macOS/Linux: `./install.sh` (restart `dsh web` yourself).
 > 2) If the scripts are unavailable, apply the two patches manually exactly as the README "For AI" section describes.
-> 3) After the harness is back, verify: I paste an image into the chat box and send it — the agent must automatically describe the image (it receives `[图片附件：<path>（如需了解内容，请调用 vision_chat 工具…）]` and calls `vision_chat`). Confirm the qwen-mm-plugins-api MCP server is registered in `profiles\web\cordis.patch.yml`, otherwise tell me to install it first.
+> 3) Note: this project is **only a bridge between "image sending" and a vision-model plugin** — it does not include a vision model. The vision plugin must be configured separately and the vision model can be freely chosen. If I did not specify which vision model to use, please **recommend a compatible one** (e.g. `mcp-qwen-mm-plugins-api` / `vision_chat`), and confirm it is registered in `profiles\web\cordis.patch.yml` with a working API key.
+> 4) After the harness is back, verify: I paste an image into the chat box and send it — the agent must automatically describe the image (it receives `[图片附件：<path>（如需了解内容，请调用你可用的视觉识图工具…）]` and automatically calls its available vision tool).
 
 ## Usage
 
@@ -107,12 +113,12 @@ Paste-to-vision is **two patches** to shipped dsh packages (no client-side chang
 2. **`patch/dsh-llm-pi-ai.patch`** — in `@deepseek-ai/dsh-llm-pi-ai/lib/index.js`, the `stream()` entry previously threw `UNSUPPORTED_CONTENT` when a text-only model received image blocks. The patch instead **projects each image block to a text placeholder**:
 
    ```
-   [图片附件：<abs path>（如需了解内容，请调用 vision_chat 工具，images 参数传此路径）]
+   [图片附件：<abs path>（如需了解内容，请调用你可用的视觉识图工具识别此图片；例如 vision_chat，images 参数传此路径）]
    ```
 
    The path is resolved by `imageAttachmentPath()` from the content-addressed ref: `<DSH_HOME>/attachments/v1/objects/<aa>/<sha256>.<ext>` (a best-effort hardlink adds the extension so tools can sniff it). The projection recurses into `tool-result` content too, so images returned by tools (e.g. `read_image`) are handled the same way. (3 hunks.)
 
-3. **The recognition side is NOT part of this repo** — the agent sees the placeholder and calls the `vision_chat` tool of the **qwen-mm-plugins-api** MCP server, which must already be registered in the profile (`profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api`) with a working API key.
+3. **The recognition side is NOT part of this repo** — the placeholder is a **generic instruction** ("use whatever vision tool you have available"), so the agent automatically picks the vision tool currently registered in the profile. A typical pairing is the `vision_chat` tool of the **qwen-mm-plugins-api** MCP server (registered in `profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api` with a working API key), but **any tool that accepts an image path and returns text works**.
 
 **Data flow:** paste → draft thumbnail → send → `prompt` RPC admitted (patch 1) → message persisted with image parts (UI history still shows the image) → LLM request serialization hits a text-only model → projection (patch 2) → agent context receives the path placeholder → agent calls `vision_chat(path)` → answer.
 
@@ -139,7 +145,7 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-p
 
 1. Paste an image into the chat box and send it (empty text auto-sends).
 2. Expected: the agent's turn shows it analyzed the image (description/OCR/answers).
-3. On the wire: the user message that reached the LLM contains `[图片附件：<path>（如需了解内容，请调用 vision_chat 工具…）]` — this is by design, not an error.
+3. On the wire: the user message that reached the LLM contains `[图片附件：<path>（如需了解内容，请调用你可用的视觉识图工具识别此图片；例如 vision_chat，images 参数传此路径）]` — the placeholder is a generic instruction (it does not hardcode one tool); the agent calls whichever vision tool it has. This is by design, not an error.
 4. Direct checks:
 
    ```powershell
@@ -154,7 +160,8 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-p
 | Symptom | Cause | Fix |
 |---|---|---|
 | "当前模型不支持图片…" still shows on send | Host patch not loaded (harness not restarted, or the profile `node_modules` junction was refreshed by a reinstall) | Restart harness; re-apply the patch; verify with the checks above |
-| Agent replies "I can't see the image" | The `vision_chat` MCP tool is not registered or the API key is missing | Check `profiles\web\cordis.patch.yml` has `mcp-qwen-mm-plugins-api`; set the key; restart |
+| Agent replies "I can't see the image" | No vision tool registered or the API key is missing | Register a vision MCP (e.g. `mcp-qwen-mm-plugins-api`) in `profiles\web\cordis.patch.yml`; set the key; restart |
+| Installer reports success but the feature is dead | git silently skips the patch when the path contains non-ASCII characters (e.g. a Chinese user name) — exit 0 but no change | The installer now re-checks file content and fails loudly; manually verify with `Select-String` (above), or move dsh to an ASCII-only path, or apply with `git apply -p1` by hand |
 | Placeholder path points to a missing file | Attachment store root differs (`DSH_HOME` override) or the object was cleaned | Check `<DSH_HOME>\attachments\v1\objects\<aa>\<sha256>`; re-paste the image |
 | `git apply` fails | Installed package version ≠ 0.1.0-rc.6 | Re-diff against `npm pack` of the exact version |
 | Images sent to a model that DOES support images | No projection runs (by design) — raw image parts go to the model | Not a bug; the feature targets text-only models |

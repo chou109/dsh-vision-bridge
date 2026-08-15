@@ -75,8 +75,17 @@ foreach ($t in $targets) {
     if (-not $git) { Write-Error "git is required to apply $($t.Name).patch — install git and retry."; exit 1 }
     Push-Location (Split-Path $t.File)
     git -c core.autocrlf=false apply --unsafe-paths --directory=(Split-Path $t.File) $t.Patch
-    if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Error "git apply failed for $($t.Name) — the installed version may differ from 0.1.0-rc.6. See README (For AI: Debugging)."; exit 1 }
+    $applyExit = $LASTEXITCODE
     Pop-Location
+    if ($applyExit -ne 0) { Write-Error "git apply failed for $($t.Name) — the installed version may differ from 0.1.0-rc.6. See README (For AI: Debugging)."; exit 1 }
+    # Re-verify by content: some git versions silently skip patches when the
+    # working path contains non-ASCII characters (e.g. a Chinese user name) —
+    # exit code 0 does NOT guarantee the file changed.
+    $c = [System.IO.File]::ReadAllText($t.File)
+    if (-not (& $t.Applied $c)) {
+        Write-Error "$($t.Name): git apply exited 0 but the file did not change (known git-on-Windows quirk with non-ASCII paths). Fix: move dsh to an ASCII path, or apply patch/$($t.Name).patch manually (git apply -p1), or reinstall $($t.Name)@0.1.0-rc.6 first."
+        exit 1
+    }
     Write-Step "$($t.Name) patched"
 }
 

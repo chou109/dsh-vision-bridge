@@ -57,6 +57,12 @@ for name in "${!PATCHES[@]}"; do
   else
     command -v git >/dev/null || { log "ERROR: git is required to apply $name.patch"; exit 1; }
     apply_one "$name"
+    # Re-verify by content: some git versions silently skip patches when the
+    # working path contains non-ASCII characters (exit 0 but no change).
+    if ! applied "$name"; then
+      log "ERROR: $name: git apply exited 0 but the file did not change (non-ASCII path quirk). Apply patch/$name.patch manually (git apply -p1) or move dsh to an ASCII path."
+      exit 1
+    fi
   fi
 done
 
