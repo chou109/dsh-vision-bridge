@@ -1,0 +1,76 @@
+diff --git a/index.js b/index.js
+index 195d407..08aa678 100644
+--- a/index.js
++++ b/index.js
+@@ -9,6 +9,9 @@ import { credentialRef } from "@deepseek-ai/dsh-credentials";
+ import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
+ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
++import { link } from "node:fs/promises";
++import { join } from "node:path";
++import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+ //#region lib/types/replay.js
+ /**
+ * Durable pi-ai replay metadata and assistant-history reconstruction.
+@@ -260,6 +263,47 @@ async function userContent(blocks, attachments) {
+ 	if (content.every((block) => block.type === "text")) return content.map((block) => block.text).join("");
+ 	return content;
+ }
++/** Replace image blocks with a text placeholder carrying the attachment path (patched: for text-only models). */
++async function projectImageBlocksToText(blocks) {
++	const out = [];
++	for (const block of blocks) {
++		if (block.type === "image") {
++			out.push({ type: "text", text: `[图片附件：${await imageAttachmentPath(block.attachment)}（如需了解内容，请调用 vision_chat 工具，images 参数传此路径）]` });
++		} else if (block.type === "tool-result") {
++			out.push({ ...block, content: await projectImageBlocksToText(block.content) });
++		} else {
++			out.push(block);
++		}
++	}
++	return out;
++}
++/** Derive the local attachment path from its content-addressed ref, best-effort with extension. */
++async function imageAttachmentPath(ref) {
++	try {
++		const id = ref && ref.attachmentId;
++		const m = typeof id === "string" ? id.match(/^sha256:([0-9a-f]{64})$/i) : null;
++		if (!m) return String(id ?? "未知");
++		const sha = m[1].toLowerCase();
++		const base = join(resolveDshHome(), "attachments", "v1", "objects", sha.slice(0, 2), sha);
++		const ext = imageMediaTypeExt(ref.mediaType);
++		if (!ext) return base;
++		const withExt = `${base}.${ext}`;
++		try { await link(base, withExt); } catch {}
++		return withExt;
++	} catch {
++		return String(ref?.attachmentId ?? "图片");
++	}
++}
++/** Map a media type to a file extension; unknown types get none. */
++function imageMediaTypeExt(mediaType) {
++	switch (String(mediaType || "").split(";")[0].trim().toLowerCase()) {
++		case "image/png": return "png";
++		case "image/jpeg": return "jpg";
++		case "image/webp": return "webp";
++		case "image/gif": return "gif";
++		default: return "";
++	}
++}
+ function toolsOf(options) {
+ 	return options.tools?.map((tool) => ({
+ 		name: tool.name,
+@@ -823,8 +867,11 @@ var PiAiAdapter = class extends LlmAdapter {
+ 			const streamIdleTimeoutMs = profile.streamIdleTimeoutMs;
+ 			const watchdog = __addDisposableResource(env_1, idleWatchdog(upstream, streamIdleTimeoutMs, "LLM_STREAM_IDLE_TIMEOUT"), false);
+ 			try {
+-				const containsImage = options.messages.some((message) => contentHasImage(message.content));
+-				if (containsImage && !model.input.includes("image")) throw new LlmError(`pi-ai model "${model.id}" does not support image input`, "UNSUPPORTED_CONTENT");
++				let containsImage = options.messages.some((message) => contentHasImage(message.content));
++				if (containsImage && !model.input.includes("image")) {
++					options = { ...options, messages: await Promise.all(options.messages.map(async (message) => ({ ...message, content: await projectImageBlocksToText(message.content) }))) };
++					containsImage = false;
++				}
+ 				const attachments = containsImage ? this.config.resolveAttachments?.() : void 0;
+ 				if (containsImage && attachments === void 0) throw new LlmError("pi-ai image input requires the durable attachment service", "UNSUPPORTED_CONTENT");
+ 				const context = attachments === void 0 ? toPiContext(options) : await toPiContext(options, attachments);

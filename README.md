@@ -1,0 +1,187 @@
+# dsh-vision-bridge
+
+Paste an image into the DeepSeek Harness chat box and let the agent **see and describe it automatically** — no more "current model does not support images" errors, no manually handing over file paths.
+
+| | |
+|---|---|
+| **Platform** | Windows / macOS / Linux (dsh web) |
+| **Requires** | DeepSeek Harness `dsh web` 0.1.0-rc.6 + the **qwen-mm-plugins-api** MCP server (`vision_chat` tool) |
+| **License** | MIT (add a `LICENSE` file before publishing) |
+
+> 中文版见 [README.zh.md](README.zh.md)。
+
+---
+
+# Part 1 — If you are a human
+
+*This part is written for people who just want the feature installed.*
+
+## What it does
+
+Before this project, pasting an image into the chat box with a text-only model (e.g. `deepseek-v4-flash`) showed:
+
+> 当前模型不支持图片，请切换支持图片的模型 / The current model does not support images; switch to a model that does
+
+After installing this project:
+
+1. **Paste any image** into the send box (it shows as a thumbnail, as usual).
+2. **Send it** — the message goes through even though the chat model cannot take images.
+3. The harness automatically hands the agent the image as a **local file path**, and the agent **automatically calls the `vision_chat` tool** (qwen-mm-plugins-api) to recognize it — it answers with a description, OCR, VQA… whatever you asked.
+
+You never type a path; the recognition happens on its own.
+
+## Screenshots
+
+_Drop your screenshots into the [`screenshots/`](screenshots) folder and reference them here._
+
+![Pasted image in the send box](screenshots/paste.png)
+
+![The agent describing the pasted image](screenshots/result.png)
+
+## Requirements
+
+- DeepSeek Harness web UI (`dsh web --host 127.0.0.1 --port 3080`)
+- The **qwen-mm-plugins-api** MCP server registered in your web profile (provides the `vision_chat` tool; needs a working DashScope-compatible API key)
+- `git` (used by the installer to apply the patches)
+
+## Manual deployment (Windows)
+
+1. **Apply the host patch** — removes the "model does not support images" rejection:
+
+   ```powershell
+   cd "$env:USERPROFILE\.dsh\profiles\node_modules\@deepseek-ai\dsh-host-apiproxy\lib"
+   git -c core.autocrlf=false apply --unsafe-paths --directory="$PWD" "..\..\..\..\..\..\dsh-vision-bridge\patch\dsh-host-apiproxy.patch"
+   ```
+
+2. **Apply the LLM patch** — text-only models receive images as a path + a vision instruction:
+
+   ```powershell
+   cd "$env:USERPROFILE\.dsh\profiles\node_modules\@deepseek-ai\dsh-llm-pi-ai\lib"
+   git -c core.autocrlf=false apply --unsafe-paths --directory="$PWD" "..\..\..\..\..\..\dsh-vision-bridge\patch\dsh-llm-pi-ai.patch"
+   ```
+
+3. **Restart the harness** — close the *DeepSeek Harness Server* window, run `start-dsh.bat` (or restart `dsh web`), then **hard-refresh the browser (Ctrl+F5)**.
+
+### One-command alternative
+
+```powershell
+.\install.ps1          # applies both patches and restarts the harness
+```
+
+## Let an AI deploy it
+
+Copy/paste this whole paragraph into your AI assistant:
+
+> Deploy the dsh-vision-bridge feature from `<repo path>` to my local DeepSeek Harness web profile.
+> 1) Windows: run `.\install.ps1` from the repo root — it applies `patch\dsh-host-apiproxy.patch` and `patch\dsh-llm-pi-ai.patch` into `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` with `git -c core.autocrlf=false apply`, then restarts the harness. macOS/Linux: `./install.sh` (restart `dsh web` yourself).
+> 2) If the scripts are unavailable, apply the two patches manually exactly as the README "For AI" section describes.
+> 3) After the harness is back, verify: I paste an image into the chat box and send it — the agent must automatically describe the image (it receives `[图片附件：<path>（如需了解内容，请调用 vision_chat 工具…）]` and calls `vision_chat`). Confirm the qwen-mm-plugins-api MCP server is registered in `profiles\web\cordis.patch.yml`, otherwise tell me to install it first.
+
+## Usage
+
+1. Paste (Ctrl+V) or drag an image into the chat box.
+2. (Optional) type a question, e.g. "这是什么".
+3. Send. The agent automatically recognizes the image with `vision_chat` and answers.
+4. Pasted images also work with **no text at all** — the message auto-sends.
+
+## Uninstall
+
+```powershell
+.\install.ps1 -Uninstall
+```
+
+or manually: `git apply -R` both patches (or reinstall `@deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6` and `@deepseek-ai/dsh-llm-pi-ai@0.1.0-rc.6`), then restart the harness.
+
+---
+
+# Part 2 — If you are an AI
+
+*This part is written for AI agents that install, debug, or extend this feature. It assumes you can run shell commands and read the dsh packages in `node_modules`.*
+
+## What this is (facts)
+
+Paste-to-vision is **two patches** to shipped dsh packages (no client-side change needed — the chat composer already allows pasting; the block was a server-side rejection at send time):
+
+1. **`patch/dsh-host-apiproxy.patch`** — in `@deepseek-ai/dsh-host-apiproxy/lib/index.js`, the `prompt` RPC handler previously rejected any message containing image parts when the selected model's `inputModalities` lacked `image` (returning `attachment-error` / `MODEL_DOES_NOT_SUPPORT_IMAGES`, which the UI renders as "当前模型不支持图片…"). The patch deletes that rejection: image parts are admitted for **any** model. (1 hunk; the file gets smaller.)
+
+2. **`patch/dsh-llm-pi-ai.patch`** — in `@deepseek-ai/dsh-llm-pi-ai/lib/index.js`, the `stream()` entry previously threw `UNSUPPORTED_CONTENT` when a text-only model received image blocks. The patch instead **projects each image block to a text placeholder**:
+
+   ```
+   [图片附件：<abs path>（如需了解内容，请调用 vision_chat 工具，images 参数传此路径）]
+   ```
+
+   The path is resolved by `imageAttachmentPath()` from the content-addressed ref: `<DSH_HOME>/attachments/v1/objects/<aa>/<sha256>.<ext>` (a best-effort hardlink adds the extension so tools can sniff it). The projection recurses into `tool-result` content too, so images returned by tools (e.g. `read_image`) are handled the same way. (3 hunks.)
+
+3. **The recognition side is NOT part of this repo** — the agent sees the placeholder and calls the `vision_chat` tool of the **qwen-mm-plugins-api** MCP server, which must already be registered in the profile (`profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api`) with a working API key.
+
+**Data flow:** paste → draft thumbnail → send → `prompt` RPC admitted (patch 1) → message persisted with image parts (UI history still shows the image) → LLM request serialization hits a text-only model → projection (patch 2) → agent context receives the path placeholder → agent calls `vision_chat(path)` → answer.
+
+## Deployment (exact steps)
+
+```powershell
+$profiles = "$env:USERPROFILE\.dsh\profiles"          # or $env:DSH_HOME\profiles
+
+# 1. host-apiproxy (removes the rejection)
+$d = "$profiles\node_modules\@deepseek-ai\dsh-host-apiproxy\lib"
+git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-host-apiproxy.patch
+
+# 2. llm-pi-ai (image -> path text projection)
+$d = "$profiles\node_modules\@deepseek-ai\dsh-llm-pi-ai\lib"
+git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-pi-ai.patch
+```
+
+- Patches target `index.js` with `a/index.js`/`b/index.js` headers; run from the repo root.
+- **Line endings**: bundles are LF-only; `-c core.autocrlf=false` is mandatory on Windows.
+- **Version pin**: context is exact for `0.1.0-rc.6`. If `git apply` fails, the installed version differs — re-diff against `npm pack @deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6` (and the same for `dsh-llm-pi-ai`).
+- **Idempotency**: `install.ps1`/`install.sh` detect the patch state via markers (host: string `MODEL_DOES_NOT_SUPPORT_IMAGES` absent ⇒ patched; llm: function `projectImageBlocksToText` present ⇒ patched).
+
+## Verification (after deploy + restart + hard refresh)
+
+1. Paste an image into the chat box and send it (empty text auto-sends).
+2. Expected: the agent's turn shows it analyzed the image (description/OCR/answers).
+3. On the wire: the user message that reached the LLM contains `[图片附件：<path>（如需了解内容，请调用 vision_chat 工具…）]` — this is by design, not an error.
+4. Direct checks:
+
+   ```powershell
+   # host patch live: the reason string is gone from the running code
+   Select-String "$profiles\node_modules\@deepseek-ai\dsh-host-apiproxy\lib\index.js" -Pattern 'MODEL_DOES_NOT_SUPPORT_IMAGES'   # -> no match
+   # llm patch live
+   Select-String "$profiles\node_modules\@deepseek-ai\dsh-llm-pi-ai\lib\index.js" -Pattern 'projectImageBlocksToText'            # -> match
+   ```
+
+### Common failure modes
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| "当前模型不支持图片…" still shows on send | Host patch not loaded (harness not restarted, or the profile `node_modules` junction was refreshed by a reinstall) | Restart harness; re-apply the patch; verify with the checks above |
+| Agent replies "I can't see the image" | The `vision_chat` MCP tool is not registered or the API key is missing | Check `profiles\web\cordis.patch.yml` has `mcp-qwen-mm-plugins-api`; set the key; restart |
+| Placeholder path points to a missing file | Attachment store root differs (`DSH_HOME` override) or the object was cleaned | Check `<DSH_HOME>\attachments\v1\objects\<aa>\<sha256>`; re-paste the image |
+| `git apply` fails | Installed package version ≠ 0.1.0-rc.6 | Re-diff against `npm pack` of the exact version |
+| Images sent to a model that DOES support images | No projection runs (by design) — raw image parts go to the model | Not a bug; the feature targets text-only models |
+
+## Operations
+
+- **Restart harness**: `taskkill /F /T /PID <node dsh web pid>` then `npx -y @deepseek-ai/dsh web --host 127.0.0.1 --port 3080`. `install.ps1` does this automatically.
+- **Rollback**: `install.ps1 -Uninstall` (or `git apply -R` both patches), restart.
+- **Junction caveat**: `profiles\node_modules\@deepseek-ai\*` are junctions to the npx cache. Re-running `npx -y @deepseek-ai/dsh` with a newer package version can overwrite patched files — re-apply after upgrades.
+- **No client changes**: do not patch `dsh-client-ui-conversation` for this feature; the composer already allows pasting.
+
+---
+
+# Extra — how it works (and why it's shaped this way)
+
+- **The rejection lived server-side, not client-side.** The composer accepts pasted images for any model; the error appeared because the host's `prompt` RPC checked `modelInfo.inputModalities` and refused. Removing that one check is the entire client-visible fix.
+- **Why path text and not pixels?** A text-only LLM cannot consume image bytes. The image is stored content-addressed by the harness anyway (`attachments/v1/objects/…`), so the cheapest reliable bridge is a path. The placeholder text doubles as an instruction, so any agent with the `vision_chat` tool recognizes the image without extra configuration.
+- **Images from tools work too.** The projection recurses into `tool-result` content, so `read_image` / `save_view` results are bridged the same way for text-only models.
+- **Attachment display is preserved.** Only the LLM *serialization* is rewritten; the persisted message and the chat UI keep the real image block.
+
+## FAQ
+
+- **Q: Is my image sent anywhere extra?** The pasted image is stored locally by dsh and read by the vision tool via its local path; the vision model (e.g. mimo-v2.5 via your DashScope-compatible endpoint) receives it exactly as before — the feature only changes *which* component reads the image (the vision model instead of the chat model).
+- **Q: Does it work with image-capable models?** Yes, unchanged: when `model.input` includes `image`, no projection runs and the model sees the pixels directly.
+- **Q: Why is the placeholder in Chinese?** The agent prompt convention in this profile is Chinese; the text is opaque to the model anyway — it only needs to identify the path and the tool name.
+- **Q: The repo has no LICENSE.** Add one before publishing (MIT suggested).
+
+---
+
+*Made for DeepSeek Harness users who want to paste a picture and get an answer.*
