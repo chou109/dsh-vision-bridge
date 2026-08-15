@@ -2,6 +2,8 @@
 
 Paste an image into the DeepSeek Harness chat box and let the agent **see and describe it automatically** — no more "current model does not support images" errors, no manually handing over file paths.
 
+> **国内镜像 / Mirror**: also hosted on [gitee.com/chill109/dsh-vision-bridge](https://gitee.com/chill109/dsh-vision-bridge) — Gitee is a mainland-China Git host (faster access from mainland China; use it if GitHub is slow).
+
 | | |
 |---|---|
 | **Platform** | Windows / macOS / Linux (dsh web) |
@@ -69,7 +71,7 @@ You never type a path; the recognition happens on its own.
 
 Copy/paste this whole paragraph into your AI assistant:
 
-> Deploy the dsh-vision-bridge feature from `https://github.com/chou109/dsh-vision-bridge` to my local DeepSeek Harness web profile.
+> Deploy the dsh-vision-bridge feature from `https://github.com/chou109/dsh-vision-bridge` (mainland-China mirror: `https://gitee.com/chill109/dsh-vision-bridge`) to my local DeepSeek Harness web profile.
 > 1) Windows: run `.\install.ps1` from the repo root — it applies `patch\dsh-host-apiproxy.patch` and `patch\dsh-llm-pi-ai.patch` into `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` with `git -c core.autocrlf=false apply`, then restarts the harness. macOS/Linux: `./install.sh` (restart `dsh web` yourself).
 > 2) If the scripts are unavailable, apply the two patches manually exactly as the README "For AI" section describes.
 > 3) Note: this project is **only a bridge between "image sending" and a vision-model plugin** — it does not include a vision model. The vision plugin must be configured separately and the vision model can be freely chosen. If I did not specify which vision model to use, please **recommend a compatible one** (e.g. `mcp-qwen-mm-plugins-api` / `vision_chat`), and confirm it is registered in `profiles\web\cordis.patch.yml` with a working API key.
