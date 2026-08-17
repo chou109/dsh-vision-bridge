@@ -5,15 +5,21 @@
 #   1. Patches @deepseek-ai/dsh-host-apiproxy — removes the
 #      MODEL_DOES_NOT_SUPPORT_IMAGES rejection so image parts are admitted
 #      regardless of the selected model.
-#   2. Patches @deepseek-ai/dsh-llm-pi-ai — text-only models receive image
+#   2. Patches @deepseek-ai/dsh-host-apiproxy (selectmodel) — removes the
+#      model-unavailable rejection when switching to a text-only model on a
+#      session that already contains images.
+#   3. Patches @deepseek-ai/dsh-llm-pi-ai — text-only models receive image
 #      blocks as a text placeholder carrying the attachment's absolute path
 #      plus an instruction to call the vision_chat tool.
-#   3. Restarts the dsh web harness (unless -NoRestart).
+#   4. Patches @deepseek-ai/dsh-llm-deepseek — the same projection for the
+#      dedicated DeepSeek chat-completions adapter (deepseek-official route,
+#      e.g. deepseek-v4-flash), which otherwise throws UNSUPPORTED_CONTENT.
+#   5. Restarts the dsh web harness (unless -NoRestart).
 #
 # Usage:
 #   .\install.ps1            # install (idempotent) and restart the harness
 #   .\install.ps1 -NoRestart # install only
-#   .\install.ps1 -Uninstall # reverse both patches (git apply -R) and restart
+#   .\install.ps1 -Uninstall # reverse all patches (git apply -R) and restart
 #
 # Prerequisite (recognition side): the qwen-mm-plugins-api MCP server with the
 # vision_chat tool must be registered in the profile (see README "For AI").
@@ -36,9 +42,21 @@ $targets = @(
         Applied  = { param($c) -not $c.Contains('MODEL_DOES_NOT_SUPPORT_IMAGES') }   # patch REMOVES this string
     },
     @{
+        Name     = 'dsh-host-apiproxy-selectmodel'
+        File     = Join-Path $profiles 'node_modules\@deepseek-ai\dsh-host-apiproxy\lib\index.js'
+        Patch    = Join-Path $repoRoot 'patch\dsh-host-apiproxy-selectmodel.patch'
+        Applied  = { param($c) -not $c.Contains('does not accept image input') }     # patch REMOVES this string
+    },
+    @{
         Name     = 'dsh-llm-pi-ai'
         File     = Join-Path $profiles 'node_modules\@deepseek-ai\dsh-llm-pi-ai\lib\index.js'
         Patch    = Join-Path $repoRoot 'patch\dsh-llm-pi-ai.patch'
+        Applied  = { param($c) $c.Contains('projectImageBlocksToText') }              # patch ADDS this function
+    },
+    @{
+        Name     = 'dsh-llm-deepseek'
+        File     = Join-Path $profiles 'node_modules\@deepseek-ai\dsh-llm-deepseek\lib\index.js'
+        Patch    = Join-Path $repoRoot 'patch\dsh-llm-deepseek.patch'
         Applied  = { param($c) $c.Contains('projectImageBlocksToText') }              # patch ADDS this function
     }
 )
@@ -46,12 +64,13 @@ $targets = @(
 function Write-Step([string]$msg) { Write-Host "[dsh-vision-bridge] $msg" -ForegroundColor Cyan }
 
 if ($Uninstall) {
-    foreach ($t in $targets) {
+    # reverse in reverse order so same-file patches unroll cleanly (LIFO)
+    foreach ($t in $targets | Select-Object -Reverse) {
         if (-not (Test-Path $t.File)) { Write-Step "skip $($t.Name): file missing"; continue }
         $c = [System.IO.File]::ReadAllText($t.File)
         if (& $t.Applied $c) {
             $git = Get-Command git -ErrorAction SilentlyContinue
-            if (-not $git) { Write-Error "uninstall needs git (to reverse the patch) or a reinstall of $($t.Name)@0.1.0-rc.6"; exit 1 }
+            if (-not $git) { Write-Error "uninstall needs git (to reverse the patch) or a reinstall of $($t.Name)"; exit 1 }
             Push-Location (Split-Path $t.File)
             git -c core.autocrlf=false apply --unsafe-paths --directory=(Split-Path $t.File) -R $t.Patch
             Pop-Location
@@ -77,13 +96,13 @@ foreach ($t in $targets) {
     git -c core.autocrlf=false apply --unsafe-paths --directory=(Split-Path $t.File) $t.Patch
     $applyExit = $LASTEXITCODE
     Pop-Location
-    if ($applyExit -ne 0) { Write-Error "git apply failed for $($t.Name) — the installed version may differ from 0.1.0-rc.6. See README (For AI: Debugging)."; exit 1 }
+    if ($applyExit -ne 0) { Write-Error "git apply failed for $($t.Name) — the installed version may differ from the pinned one. See README (For AI: Debugging)."; exit 1 }
     # Re-verify by content: some git versions silently skip patches when the
     # working path contains non-ASCII characters (e.g. a Chinese user name) —
     # exit code 0 does NOT guarantee the file changed.
     $c = [System.IO.File]::ReadAllText($t.File)
     if (-not (& $t.Applied $c)) {
-        Write-Error "$($t.Name): git apply exited 0 but the file did not change (known git-on-Windows quirk with non-ASCII paths). Fix: move dsh to an ASCII path, or apply patch/$($t.Name).patch manually (git apply -p1), or reinstall $($t.Name)@0.1.0-rc.6 first."
+        Write-Error "$($t.Name): git apply exited 0 but the file did not change (known git-on-Windows quirk with non-ASCII paths). Fix: move dsh to an ASCII path, or apply patch/$($t.Name).patch manually (git apply -p1), or reinstall $($t.Name) first."
         exit 1
     }
     Write-Step "$($t.Name) patched"

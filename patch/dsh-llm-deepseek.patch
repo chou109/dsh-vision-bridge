@@ -1,0 +1,72 @@
+diff --git a/index.js b/index.js
+index b9624f2..d81bfa3 100644
+--- a/index.js
++++ b/index.js
+@@ -5,6 +5,9 @@ import { launchEnvironmentOf } from "@deepseek-ai/dsh-launch-environment";
+ import { deepEqualJson, installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+ import { MAX_TIMER_DELAY_MS, idleWatchdog, timeoutOf } from "@deepseek-ai/dsh-timeout";
+ import { getOrCreateAnonymousUserId } from "@deepseek-ai/dsh-anonymous-user-id";
++import { link } from "node:fs/promises";
++import { join } from "node:path";
++import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+ import { EventSourceParserStream } from "eventsource-parser/stream";
+ //#region lib/types/serialize.js
+ /**
+@@ -37,6 +40,47 @@ function flattenText(blocks) {
+ 	return blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+ }
+ /** Reject core image content before any text-flattening path can silently erase it. */
++/** Replace image blocks with a text placeholder carrying the attachment path (patched: for text-only models). */
++async function projectImageBlocksToText(blocks) {
++	const out = [];
++	for (const block of blocks) {
++		if (block.type === "image") {
++			out.push({ type: "text", text: `[图片附件：${await imageAttachmentPath(block.attachment)}（如需了解内容，请调用你可用的视觉识图工具识别此图片；例如 vision_chat，images 参数传此路径）]` });
++		} else if (block.type === "tool-result") {
++			out.push({ ...block, content: await projectImageBlocksToText(block.content) });
++		} else {
++			out.push(block);
++		}
++	}
++	return out;
++}
++/** Derive the local attachment path from its content-addressed ref, best-effort with extension. */
++async function imageAttachmentPath(ref) {
++	try {
++		const id = ref && ref.attachmentId;
++		const m = typeof id === "string" ? id.match(/^sha256:([0-9a-f]{64})$/i) : null;
++		if (!m) return String(id ?? "未知");
++		const sha = m[1].toLowerCase();
++		const base = join(resolveDshHome(), "attachments", "v1", "objects", sha.slice(0, 2), sha);
++		const ext = imageMediaTypeExt(ref.mediaType);
++		if (!ext) return base;
++		const withExt = `${base}.${ext}`;
++		try { await link(base, withExt); } catch {}
++		return withExt;
++	} catch {
++		return String(ref?.attachmentId ?? "图片");
++	}
++}
++/** Map a media type to a file extension; unknown types get none. */
++function imageMediaTypeExt(mediaType) {
++	switch (String(mediaType || "").split(";")[0].trim().toLowerCase()) {
++		case "image/png": return "png";
++		case "image/jpeg": return "jpg";
++		case "image/webp": return "webp";
++		case "image/gif": return "gif";
++		default: return "";
++	}
++}
+ function assertTextOnly(blocks) {
+ 	if (contentHasImage(blocks)) throw new LlmError("The DeepSeek chat-completions adapter does not support image content.", "UNSUPPORTED_CONTENT");
+ }
+@@ -568,6 +612,9 @@ var DeepSeekAdapter = class extends LlmAdapter {
+ 		}
+ 	}
+ 	async *request(options, signal, connection, apiKey, userId, onComment) {
++		if (options.messages.some((message) => contentHasImage(message.content))) {
++			options = { ...options, messages: await Promise.all(options.messages.map(async (message) => ({ ...message, content: await projectImageBlocksToText(message.content) }))) };
++		}
+ 		const body = serializeRequest(options, connection.defaults);
+ 		const payload = JSON.stringify(body);
+ 		const headers = {

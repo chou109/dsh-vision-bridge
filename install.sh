@@ -6,8 +6,8 @@
 #   ./install.sh            # install (idempotent)
 #   ./install.sh --uninstall
 #
-# Applies patch/dsh-host-apiproxy.patch and patch/dsh-llm-pi-ai.patch with
-# `git apply` (LF-safe), then you restart the harness yourself.
+# Applies the four patch files with `git apply` (LF-safe), then you restart
+# the harness yourself.
 
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
@@ -18,14 +18,19 @@ log() { printf '[dsh-vision-bridge] %s\n' "$*"; }
 
 declare -A PATCHES=(
   [dsh-host-apiproxy]="$PROFILE/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js"
+  [dsh-host-apiproxy-selectmodel]="$PROFILE/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js"
   [dsh-llm-pi-ai]="$PROFILE/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js"
+  [dsh-llm-deepseek]="$PROFILE/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js"
 )
+ORDER=(dsh-host-apiproxy dsh-host-apiproxy-selectmodel dsh-llm-pi-ai dsh-llm-deepseek)
 
-applied() { # applied <name>
+applied() { # applied <name> — exit 0 means patched
   local f="${PATCHES[$1]}"
   case "$1" in
-    dsh-host-apiproxy) grep -q 'MODEL_DOES_NOT_SUPPORT_IMAGES' "$f";; # patched => string ABSENT
-    dsh-llm-pi-ai) grep -q 'projectImageBlocksToText' "$f";;          # patched => string PRESENT
+    dsh-host-apiproxy) ! grep -q 'MODEL_DOES_NOT_SUPPORT_IMAGES' "$f";;         # patched => string ABSENT
+    dsh-host-apiproxy-selectmodel) ! grep -q 'does not accept image input' "$f";; # patched => string ABSENT
+    dsh-llm-pi-ai) grep -q 'projectImageBlocksToText' "$f";;                     # patched => string PRESENT
+    dsh-llm-deepseek) grep -q 'projectImageBlocksToText' "$f";;                  # patched => string PRESENT
   esac
 }
 
@@ -42,7 +47,9 @@ apply_one() { # apply_one <name> <reverse?>
 }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  for name in "${!PATCHES[@]}"; do
+  # reverse in reverse order so same-file patches unroll cleanly (LIFO)
+  for ((i = ${#ORDER[@]} - 1; i >= 0; i--)); do
+    name="${ORDER[$i]}"
     [[ -f "${PATCHES[$name]}" ]] || { log "skip $name: file missing"; continue; }
     if applied "$name"; then apply_one "$name" -R; else log "$name not patched, nothing to undo"; fi
   done
@@ -50,7 +57,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
-for name in "${!PATCHES[@]}"; do
+for name in "${ORDER[@]}"; do
   [[ -f "${PATCHES[$name]}" ]] || { log "ERROR: $name target not found: ${PATCHES[$name]}"; exit 1; }
   if applied "$name"; then
     log "$name already patched, skipping"

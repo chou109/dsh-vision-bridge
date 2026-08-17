@@ -37,10 +37,45 @@
 > - 视觉模型**可以自由选择**——只要是一个"能接收图片并返回文字描述"的工具即可，不限于某一个；
 > - 如果你没说用哪个视觉模型，让 AI **自己推荐一个能适配的**（比如 `mcp-qwen-mm-plugins-api` 的 `vision_chat`）；AI 会按占位符里的提示，调用它当前可用的识图工具。
 
+## 定位：只是"桥"，本身不带识图能力
+
+**dsh-vision-bridge 不包含、不内置、不替你安装任何识图模型/工具。** 它只做两件事：
+
+1. 让纯文本主模型（如 `deepseek-v4-flash`）的会话**允许发送图片**（去掉 harness 的拒绝检查）；
+2. 请求时把图片块**投影成"附件路径 + 识图指令"的文本**，让主模型**调用你已注册的识图工具**去读图。
+
+分工是：主模型（DeepSeek 等）负责"思考"，识图工具负责"看"——**"看"的能力不在本仓库里**。没有识图工具，这座桥本身什么都看不见。
+
+## 推荐搭配（识图侧由你自己配）
+
+**识图工具（MCP 插件）**——推荐 [qwen-mm-plugins](https://github.com/QwenLM/qwen-mm-plugins)：
+
+- `api` 能力：云端识图工具 `vision_chat`（描述/问答）、`ocr`（文字提取）、`grounding`（定位框）等；把 `mcp-qwen-mm-plugins-api` 注册进 `profiles\web\cordis.patch.yml` 后，本桥的占位符指令会自动调用它；
+- `core` 能力：本地读取/可视化（图像、视频、文档、代码等），无需联网。
+
+**免费识图 API（任选其一，OpenAI 兼容端点即可）**：
+
+| API | 模型 | 费用 | 端点 |
+|---|---|---|---|
+| 智谱 GLM-4V-Flash（推荐） | `glm-4v-flash` | **完全免费**，注册即用 | `https://open.bigmodel.cn/api/paas/v4` |
+| 硅基流动 | `Qwen/Qwen2.5-VL-7B-Instruct` | 免费模型（限速约 2 RPM） | `https://api.siliconflow.cn/v1` |
+| 阿里云百炼 DashScope | `qwen-vl-plus` 等 | 新用户免费额度 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| OpenRouter / GitHub Models | `qwen-2.5-vl-72b:free` 等 | 免费档 | 需科学上网 |
+
+以智谱为例，在 qwen-mm-plugins 的配置文件 `~/.qwen-mm-plugins/config` 里写：
+
+```
+DASHSCOPE_API_KEY = <智谱 API Key（open.bigmodel.cn 免费领取）>
+DASHSCOPE_BASE_URL = https://open.bigmodel.cn/api/paas/v4
+QWEN_MM_VISION_MODEL = glm-4v-flash
+```
+
+> 小提示：`glm-4v-flash` 的输出上限是 1024 tokens，qwen-mm-plugins 已自动适配；免费档限速约 3-10 RPM，聊天场景够用。
+
 ## 环境要求
 
 - DeepSeek Harness Web 界面（`dsh web --host 127.0.0.1 --port 3080`）
-- **qwen-mm-plugins-api** MCP 服务已注册到 web profile（提供 `vision_chat` 工具；需要可用的 DashScope 兼容 API key）
+- **qwen-mm-plugins-api** MCP 服务已注册到 web profile（提供 `vision_chat` 工具；需要一个可用的 OpenAI 兼容 API key，如智谱 / 硅基流动 / DashScope）
 - `git`（安装脚本用它打补丁）
 
 ## 手动部署（Windows）
@@ -64,7 +99,7 @@
 ### 一条命令搞定
 
 ```powershell
-.\install.ps1          # 自动打两个补丁并重启 harness
+.\install.ps1          # 自动打四个补丁并重启 harness
 ```
 
 ## 让 AI 帮你部署
@@ -72,8 +107,8 @@
 把下面这段话原样发给你的 AI 助手：
 
 > 请把 `https://github.com/chou109/dsh-vision-bridge`（国内镜像：`https://gitee.com/chill109/dsh-vision-bridge`）里的 dsh-vision-bridge 功能部署到我的本地 DeepSeek Harness web profile。
-> 1) Windows 下在仓库根目录运行 `.\install.ps1`——它用 `git -c core.autocrlf=false apply` 把 `patch\dsh-host-apiproxy.patch` 和 `patch\dsh-llm-pi-ai.patch` 打进 `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` 对应文件，然后重启 harness。macOS/Linux 用 `./install.sh`（重启 `dsh web` 由我自己来）。
-> 2) 脚本不可用时，按 README「如果你是 AI 请看」的精确步骤手动打两个补丁。
+> 1) Windows 下在仓库根目录运行 `.\install.ps1`——它用 `git -c core.autocrlf=false apply` 把 `patch\dsh-host-apiproxy.patch`、`patch\dsh-host-apiproxy-selectmodel.patch`、`patch\dsh-llm-pi-ai.patch` 和 `patch\dsh-llm-deepseek.patch` 打进 `%USERPROFILE%\.dsh\profiles\node_modules\@deepseek-ai\...` 对应文件，然后重启 harness。macOS/Linux 用 `./install.sh`（重启 `dsh web` 由我自己来）。
+> 2) 脚本不可用时，按 README「如果你是 AI 请看」的精确步骤手动打四个补丁。
 > 3) 注意：这个项目**只是"图片发送 + 视觉模型插件"之间的桥**，它本身不包含视觉模型——视觉模型插件需要我另外配置，而且视觉模型可以自由选择。如果我没有指定用哪个视觉模型，请帮我**推荐一个能适配的**（例如 `mcp-qwen-mm-plugins-api` / `vision_chat`），并确认它在 `profiles\web\cordis.patch.yml` 里注册好、API key 可用。
 > 4) harness 起来后验证：我在聊天框粘贴一张图片发送，AI 必须自动识别图片内容（它会收到 `[图片附件：<路径>（如需了解内容，请调用你可用的视觉识图工具…）]` 并自动调用识图工具）。
 
@@ -90,7 +125,7 @@
 .\install.ps1 -Uninstall
 ```
 
-或者手动：`git apply -R` 两个补丁（或重装 `@deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6` 和 `@deepseek-ai/dsh-llm-pi-ai@0.1.0-rc.6`），然后重启 harness。
+或者手动：`git apply -R` 四个补丁（或重装 `@deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6`、`@deepseek-ai/dsh-llm-pi-ai@0.1.0-rc.6` 和 `@deepseek-ai/dsh-llm-deepseek`），然后重启 harness。
 
 ---
 
@@ -100,7 +135,7 @@
 
 ## 这是什么（客观事实）
 
-粘贴识图 = **对两个随包 dsh 文件打补丁**（客户端完全不用改——输入框本来就允许粘贴，拦截点在发送时的服务端拒绝）：
+粘贴识图 = **对三个随包 dsh 文件打补丁（四个补丁文件）**（客户端完全不用改——输入框本来就允许粘贴，拦截点在发送时的服务端拒绝）：
 
 1. **`patch/dsh-host-apiproxy.patch`** — 在 `@deepseek-ai/dsh-host-apiproxy/lib/index.js` 的 `prompt` RPC 里，原来当所选模型的 `inputModalities` 不含 `image` 时，会拒绝任何带图片部分的消息（返回 `attachment-error` / `MODEL_DOES_NOT_SUPPORT_IMAGES`，前端渲染成"当前模型不支持图片…"）。补丁删掉这段拒绝：**任何模型都放行图片**。（1 个 hunk，文件变小。）
 
@@ -112,9 +147,13 @@
 
    路径由 `imageAttachmentPath()` 从内容寻址引用解析：`<DSH_HOME>/attachments/v1/objects/<aa>/<sha256>.<ext>`（尽力硬链补上扩展名，方便工具识别类型）。投影会递归进入 `tool-result` 内容，所以工具返回的图片（如 `read_image`）同样处理。（3 个 hunk。）
 
-3. **识别侧不在本仓库** — 占位符是**通用指令**（"调用你可用的视觉识图工具"），AI 会自动选择它当前可用的识图工具。典型搭配是 **qwen-mm-plugins-api** MCP 服务的 `vision_chat`（需已注册在 profile `profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api` 且 API key 可用），但**不限于此**——任何"输入图片路径、输出文字描述"的工具都能适配。
+3. **`patch/dsh-host-apiproxy-selectmodel.patch`** — 同文件的 `selectModel` RPC 原本在**切换模型**时会拒绝："新模型不支持图片但会话里已有图片"（`model-unavailable`）。补丁删掉这段拒绝：含图片的会话可以自由切到纯文本模型——图片由下面的投影补丁在请求时桥接。（1 个 hunk。）
 
-**数据流：** 粘贴 → 草稿缩略图 → 发送 → `prompt` RPC 放行（补丁 1）→ 消息持久化保留图片块（聊天历史仍显示图片）→ LLM 请求序列化遇到纯文本模型 → 投影（补丁 2）→ AI 上下文收到路径占位符 → AI 调用可用的识图工具（如 `vision_chat(path)`）→ 回答。
+4. **`patch/dsh-llm-deepseek.patch`** — 新版 harness 中 DeepSeek 官方路由（`deepseek-official`，例如 `deepseek-v4-flash`）走**专用适配器** `@deepseek-ai/dsh-llm-deepseek`，它原本对图片块无条件抛 `UNSUPPORTED_CONTENT`（"The DeepSeek chat-completions adapter does not support image content."）。补丁在 `request()` 序列化前做与 pi-ai 相同的投影（递归含 `tool-result`）。（3 个 hunk。）
+
+5. **识别侧不在本仓库** — 占位符是**通用指令**（"调用你可用的视觉识图工具"），AI 会自动选择它当前可用的识图工具。典型搭配是 **qwen-mm-plugins-api** MCP 服务的 `vision_chat`（需已注册在 profile `profiles/web/cordis.patch.yml` → `mcp-qwen-mm-plugins-api` 且 API key 可用），但**不限于此**——任何"输入图片路径、输出文字描述"的工具都能适配。
+
+**数据流：** 粘贴 → 草稿缩略图 → 发送 → `prompt` RPC 放行（补丁 1）→ 消息持久化保留图片块（聊天历史仍显示图片）→ LLM 请求序列化遇到纯文本模型 → 投影（补丁 2 / 补丁 4，按模型走的适配器分流）→ AI 上下文收到路径占位符 → AI 调用可用的识图工具（如 `vision_chat(path)`）→ 回答。切换模型时 `selectModel` 不再拒绝含图片的会话（补丁 3）。
 
 ## 部署（精确步骤）
 
@@ -128,12 +167,20 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-host-
 # 2. llm-pi-ai（图片 -> 路径文本投影）
 $d = "$profiles\node_modules\@deepseek-ai\dsh-llm-pi-ai\lib"
 git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-pi-ai.patch
+
+# 3. host-apiproxy（切换模型时的图片会话拒绝移除）
+$d = "$profiles\node_modules\@deepseek-ai\dsh-host-apiproxy\lib"
+git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-host-apiproxy-selectmodel.patch
+
+# 4. llm-deepseek（DeepSeek 专用适配器：图片 -> 路径文本投影）
+$d = "$profiles\node_modules\@deepseek-ai\dsh-llm-deepseek\lib"
+git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-deepseek.patch
 ```
 
 - 补丁目标是 `index.js`，头为 `a/index.js`/`b/index.js`；在仓库根目录执行。
 - **换行符**：bundle 是纯 LF；Windows 上必须 `-c core.autocrlf=false`。
-- **版本锁定**：上下文针对 `0.1.0-rc.6`。`git apply` 失败说明版本不一致——用 `npm pack @deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6`（`dsh-llm-pi-ai` 同理）重新 diff。
-- **幂等**：`install.ps1`/`install.sh` 用标记判断是否已打（host：`MODEL_DOES_NOT_SUPPORT_IMAGES` 字符串**不存在**=已打；llm：`projectImageBlocksToText` 函数**存在**=已打）。
+- **版本锁定**：上下文针对 `0.1.0-rc.6`。`git apply` 失败说明版本不一致——用 `npm pack @deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6`（`dsh-llm-pi-ai`、`dsh-llm-deepseek` 同理）重新 diff。
+- **幂等**：`install.ps1`/`install.sh` 用标记判断是否已打（host：`MODEL_DOES_NOT_SUPPORT_IMAGES` 字符串**不存在**=已打；selectmodel：`does not accept image input` **不存在**=已打；llm（pi-ai / deepseek）：`projectImageBlocksToText` 函数**存在**=已打）。
 
 ## 部署后验证
 
@@ -145,8 +192,12 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-p
    ```powershell
    # host 补丁生效：错误码字符串已从运行代码中消失
    Select-String "$profiles\node_modules\@deepseek-ai\dsh-host-apiproxy\lib\index.js" -Pattern 'MODEL_DOES_NOT_SUPPORT_IMAGES'   # -> 无匹配
-   # llm 补丁生效
+   # llm 补丁生效（pi-ai 适配器）
    Select-String "$profiles\node_modules\@deepseek-ai\dsh-llm-pi-ai\lib\index.js" -Pattern 'projectImageBlocksToText'            # -> 有匹配
+   # llm 补丁生效（deepseek 专用适配器）
+   Select-String "$profiles\node_modules\@deepseek-ai\dsh-llm-deepseek\lib\index.js" -Pattern 'projectImageBlocksToText'         # -> 有匹配
+   # selectmodel 补丁生效：错误码字符串已从运行代码中消失
+   Select-String "$profiles\node_modules\@deepseek-ai\dsh-host-apiproxy\lib\index.js" -Pattern 'does not accept image input'   # -> 无匹配
    ```
 
 ### 常见故障
@@ -158,6 +209,9 @@ git -c core.autocrlf=false apply --unsafe-paths --directory="$d" patch\dsh-llm-p
 | 安装脚本显示成功但功能没生效 | git 在含非 ASCII 字符的路径（如中文用户名）下可能**静默跳过**补丁（exit 0 但文件没变） | 安装脚本现在会做"按内容复查"并大声报错；手动时用 `Select-String` 验证（见上），或把 dsh 移到纯 ASCII 路径，或手动 `git apply -p1` |
 | 占位符路径指向不存在的文件 | 附件存储根不同（`DSH_HOME` 覆盖）或对象被清理 | 检查 `<DSH_HOME>\attachments\v1\objects\<aa>\<sha256>`；重新粘贴图片 |
 | `git apply` 失败 | 安装的包版本 ≠ 0.1.0-rc.6 | 用 `npm pack` 精确版本重新 diff |
+| 报错 `The DeepSeek chat-completions adapter does not support image content.` | `dsh-llm-deepseek` 补丁缺失（harness 升级后 DeepSeek 官方路由改走专用适配器，pi-ai 投影不再生效） | 打 `patch\dsh-llm-deepseek.patch`（`install.ps1` 自动处理）；重启 |
+| 切换模型报 `Model "..." does not accept image input, but this session already contains images` | `selectModel` 拒绝，补丁 3 未打 | 打 `patch\dsh-host-apiproxy-selectmodel.patch`；重启 |
+| 内置 `read_image` 工具报 "does not declare image input" | 工具级提示（设计如此）：纯文本模型不该直接消费图片块 | 让 agent 改用识图工具（`vision_chat`/`ocr`，传本地路径）；不是本项目的问题 |
 | 图片发给支持图片的模型 | 不投影（设计如此）——原始图片直接给模型 | 不是 bug；本功能面向纯文本模型 |
 
 ## 运维
